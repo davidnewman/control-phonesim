@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+
+print_help() {
+    cat <<- HELP
+This command allows you to start and stop the ofono-phonesim modem.
+
+Usage: control-phonesim <subcommand> [args]
+
+Subcommands:
+    start [args]
+        [-t | --timeout]     - value in seconds to wait for modem to start; default 30
+        [-d | --dep-timeout] - value in seconds to wait for any dependencies; default 30
+        [-p | --port]        - port ofono-phonesim is listening on; default 12345
+
+    stop
+
+Examples:
+
+    # Start the modem and wait 42 seconds
+    control-phonesim start -t 42
+
+    # Stop the modem
+    control-phonesim stop
+HELP
+}
+
+parse_start_args() {
+    SHORT=t:
+    LONG=timeout:
+    OPTS=$(getopt -a -n start --options $SHORT --longoptions $LONG -- "$@")
+
+    eval set -- "$OPTS"
+
+    while :
+    do
+        case "$1" in
+            -t | --timeout)
+                start_timeout=$2
+                shift 2
+                ;;
+            -d | --dep-timeout)
+                dep_timeout=$2
+                shift 2
+                ;;
+            -p | --port)
+                ofono_port=$2
+                shift 2
+                ;;
+            --)
+                shift;
+                break
+                ;;
+            *)
+                >&2 echo "Unexpected argument: $1"
+                print_help
+                exit 1
+                ;;
+        esac
+    done
+}
+
+fail_on_missing_deps() {
+    if [ ! -f /opt/ofono/test/enable-modem ] || \
+       [ ! -f /opt/ofono/test/online-modem ] || \
+       [ ! -f /opt/ofono/test/disable-modem ] || \
+       [ ! -f /opt/ofono/test/offline-modem ] || \
+       [ ! -f /opt/ofono/test/list-modems ]; then
+        >&2 echo "Missing dependencies to start ofono-phonesim"
+        exit 1
+    fi
+}
+
+start_modem() {
+    /opt/ofono/test/enable-modem
+    /opt/ofono/test/online-modem
+}
+
+stop_modem() {
+    /opt/ofono/test/offline-modem
+    /opt/ofono/test/disable-modem
+}
+
+wait_for_ofono() {
+    local timeout_seconds=$1
+    local port=$2
+    local time_spent=0
+    local time_interval=1
+
+    until nc -zv localhost $port > /dev/null 2>&1; do
+        sleep $time_interval
+        time_spent=$((time_spent + time_interval))
+        echo "waited ${time_spent} seconds for ofono..."
+
+        if [ $time_spent -ge $timeout_seconds ]; then
+            >&2 echo "Exceeded timout of ${timeout_seconds} waiting for ofono"
+            exit 1
+        fi
+    done
+    echo "ofono started and ready"
+}
+
+wait_for_modem() {
+    local timeout_seconds=$1
+    local time_spent=0
+    local time_interval=1
+
+    until /opt/ofono/test/list-modems | grep 'Attached = 1' > /dev/null ; do
+        sleep $time_interval
+        time_spent=$((time_spent + time_interval))
+        echo "waited ${time_spent} seconds for modem..."
+
+        if [ $time_spent -ge $timeout_seconds ]; then
+            >&2 echo "Exceeded timout of ${timeout_seconds} waiting for modem"
+            exit 1
+        fi
+    done
+    echo "modem started and ready"
+}
+
+fail_on_missing_deps
+
+ps aux | grep pulse
+
+case "$1" in
+    "start")
+        # set defaults
+        start_timeout=30
+        dep_timeout=30
+        ofono_port=12345
+
+        parse_start_args "$@"
+
+        wait_for_ofono $dep_timeout $ofono_port
+        start_modem
+        wait_for_modem $start_timeout
+        ;;
+    "stop")
+        stop_modem
+        ;;
+    *)
+        print_help
+        ;;
+esac

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Restart pulseaudio
+GenericName=Restart pulseaudio
+Comment=Restarts pulseaudio on startup
+Exec=/usr/local/bin/restart-pulseaudio
+Terminal=false
+Type=Application
+X-GNOME-Autostart-enabled=true
